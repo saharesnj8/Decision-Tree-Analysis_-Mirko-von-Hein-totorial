@@ -2,7 +2,9 @@
 title: "Decision Analysis"
 author: "Zahra Esmaeilinezhad"
 date: "2026-06-13"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 ########################################################################################################
 # Part 1. Background
@@ -340,8 +342,15 @@ m.owsa.input <- data.frame(
   wtp          = input$wtp
 )
 
-# Run model for each parameter value
-outcomes_TC <- t(apply(m.owsa.input, 1, dec_tree))[, 1:2] 
+## Generate matrix of inputs for decision tree (Replace variable 3 which is TxA_Cured with the ranges)
+m.owsa.input <- cbind(p.TxA_Cured = p.TxA_Cured_range, input[-3])
+m.owsa.input
+```
+
+```{R}
+# Run model for each parameter value: Run model with captured Total Costs across the ranges 0.00 to 1.00 for probability of cured with Treatment A
+outcomes_TC <- t(apply(m.owsa.input, 1, dec_tree)) 
+outcomes_TC
 
 # Without transpose - gives us 7 rows (outputs) × 11 columns (scenarios)
 apply.table1 <- apply(m.owsa.input, 1, dec_tree)
@@ -355,6 +364,14 @@ apply.table2 <- t(apply(m.owsa.input, 1, dec_tree))
 # Part 7. Visualize one-way sensitivity analysis
 ########################################################################################################
 
+```{R}
+
+Strategies <- c("Treatment A", "Treatment B")
+plot(p.TxA_Cured_range, outcomes_TC[ , 1], type="l", xlab="Prob of being Cured", ylab="Total Costs")
+lines(p.TxA_Cured_range, outcomes_TC[ , 2], col="red")
+legend("topright", Strategies, col=1:2, lty=c(1, 1), bty="n")
+
+```
 
 ```{R}
 # Create elegant plot using base R with custom colors
@@ -426,6 +443,7 @@ dev.off()
 
   # Tornado diagrams show which parameters have the greatest impact on our results.
   # We vary each parameter across a plausible range and measure the effect on ICER.
+  # Instead of having to create multiple one-way sensitivity analyses plots, you can summarize these into a tornado diagram.   # A tornado diagram can rank the impact of the parameter on the model’s outcome (e.g., ICER). Rank is determined by spread or the amount of change from the base-case ICER.
 
 ```{R}
 
