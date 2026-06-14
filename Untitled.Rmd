@@ -1,0 +1,676 @@
+---
+title: "Decision Analysis"
+author: "Zahra Esmaeilinezhad"
+date: "2026-06-13"
+output: html_document
+---
+########################################################################################################
+# Part 1. Background
+########################################################################################################
+
+Comparing two treatments (A and B) for acute respiratory infection. Both treatment aims to cure patients, but they differ in:
+-Upfront treatment cost
+-Cure rate
+-Risk of adverse drug reaction (ADRs)
+-associated downstream costs
+
+key considerations:
+-ARDs require additional management costs
+-Treatment failure require additional treatment cost
+-Health outcomes differ between cured and uncured patients
+
+Task: 
+-Determine the incremental cost-effectiveness ratio (ICER) 
+-Decide whether Treatment A represents good value for money compare to Treatment B
+
+What we know:
+
+Probabilities:
+-Treatment A
+    adverse reaction: 0.2
+    No adverse reaction: 0.8
+    Cured: 0.9
+    Not cured: 0.1
+-Treatment B
+    adverse reaction: 0.3
+    No adverse reaction: 0.7
+    Cured: 0.8
+    Not cured: 0.2
+    
+Costs:
+-Treatment A: $100
+-Treatment B: $80
+-Adverse reaction: $500
+-Not cured: $150
+
+Life years:
+-Cured:20
+-Not cured:10
+
+########################################################################################################
+# Part 2. Load Libraries 
+########################################################################################################
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+```
+
+########################################################################################################
+# Part 3. Define parameters
+########################################################################################################
+
+```{r}
+input <- data.frame(
+ # Clinical probabilities for Treatment A
+ p.TxA_ADR = 0.2,
+ p.TxA_Cured = 0.9,
+ 
+ # Clinical probabilities for Treatment B
+ p.TxB_ADR = 0.3,
+ p.TxB_Cured = 0.8,
+ 
+ # Health outcome (life years)
+ ly.Cured = 20,
+ ly.NotCured = 10,
+ 
+ # Cost (in $)
+ c.TxA = 100,
+ c.TxB = 80,
+ c.ADR = 500,
+ c.NoADR = 0,
+ c.Cured = 0,
+ c.NotCured = 150,
+ 
+ # Decision threshold (willingness to pay threshold per life year gained)
+ wtp = 100
+)
+
+```
+
+########################################################################################################
+# Part 4. Build the decision tree model
+########################################################################################################
+
+ # We wrap the decision tree calculation into a funstion so we can:
+ # -easily run the model with different parameters
+ # -perform sensitivity analysis
+ # -keep code organized and reusable
+
+```{r}
+
+dec_tree <- function(params) {
+  with(as.list(params),{
+    
+
+#-----------------------------------------------------------------------------
+### Step 1: Calculate probabilities 
+#-----------------------------------------------------------------------------
+    
+ # For each treatment, we have 4 mutually exclusive pathway based on:
+ # -whether patients experience ADR (yes/no)
+ # -whether patient is cured (yes/no)
+
+ # Treatment A pathways
+
+ep1 <- (1 - p.TxA_ADR) * p.TxA_Cured           #pathway 1: No ADR, Cured
+ep2 <- (1 - p.TxA_ADR) * (1 - p.TxA_Cured)     #pathway 2: No ADR, Not Cured
+ep3 <- p.TxA_ADR * p.TxA_Cured                 #pathway 3: ADR, Cured
+ep4 <- p.TxA_ADR * (1 - p.TxA_Cured)           #pathway 4: ADR, Not Cured
+
+
+ #Treatment B pathways
+
+ep5 <- (1 - p.TxB_ADR) * p.TxB_Cured           #pathway 5: No ADR, Cured
+ep6 <- (1 - p.TxB_ADR) * (1 - p.TxB_Cured)     #pathway 6: No ADR, Not Cured
+ep7 <- p.TxB_ADR * p.TxB_Cured                 #pathway 7: ADR, Cured
+ep8 <- p.TxB_ADR * (1 - p.TxB_Cured)           #pathway 8: ADR, Not Cured
+
+
+#-----------------------------------------------------------------------------
+### Step 2: Calculate total cost per pathway
+#-----------------------------------------------------------------------------
+
+ # Treatment A pathway costs
+
+tc1 <- c.TxA + c.NoADR + c.Cured                #pathway 1 cost
+tc2 <- c.TxA + c.NoADR + c.NotCured             #pathway 2 cost
+tc3 <- c.TxA + c.ADR + c.Cured                  #pathway 3 cost
+tc4 <- c.TxA + c.ADR + c.NotCured               #pathway 4 cost
+
+
+ # Treatment B pathway costs
+
+tc5 <- c.TxB + c.NoADR + c.Cured                #pathway 5 cost
+tc6 <- c.TxB + c.NoADR + c.NotCured             #pathway 6 cost
+tc7 <- c.TxB + c.ADR + c.Cured                  #pathway 7 cost
+tc8 <- c.TxB + c.ADR + c.NotCured               #pathway 8 cost
+
+#-----------------------------------------------------------------------------
+### Step 3: Calculate expected values (probabilities - weighted outcomes)
+#-----------------------------------------------------------------------------
+
+ # Expected value = sum of (probabilities * outcomes) for all pathways
+ # This is core of decision tree analysis
+
+ # Expected total costs (sum of weighted pathway costs)
+
+etc.TxA <- (ep1 * tc1) + (ep2 * tc2) + (ep3 * tc3) + (ep4 * tc4) 
+etc.TxB <- (ep5 * tc5) + (ep6 * tc6) + (ep7 * tc7) + (ep8 * tc8) 
+
+
+ # Expected life years (sum of weighted pathway life years)
+
+ely.TxA <- (ep1 * ly.Cured) + (ep2 * ly.NotCured) + (ep3 * ly.Cured) + (ep4 * ly.NotCured) 
+ely.TxB <- (ep5 * ly.Cured) + (ep6 * ly.NotCured) + (ep7 * ly.Cured) + (ep8 * ly.NotCured) 
+
+#-----------------------------------------------------------------------------
+### Step 4: Calculate incremental cost and ICER
+#-----------------------------------------------------------------------------
+
+ # Incremental values (Treatment A vs. Treatment B)
+
+IC <- etc.TxA - etc.TxB
+IE <- ely.TxA - ely.TxB
+ICER = IC / IE
+
+#-----------------------------------------------------------------------------
+### Step 5: Prepare output
+#-----------------------------------------------------------------------------
+
+ # Combine all results
+
+C <- c(etc.TxA, etc.TxB)
+LY <- c(ely.TxA, ely.TxB)
+
+
+ # Add names for clarity
+
+names(C) <- paste("C", c("TxA", "TxB"), sep = "_")
+names(LY) <- paste("LY", c("TxA", "TxB"), sep = "_")
+names(IC) <- "Incr Costs"
+names(IE) <- "Incr Life Years"
+names(ICER) <- "ICER"
+
+
+ # Return all results
+ 
+return(c(C, LY, IC, IE, ICER)) 
+
+ })
+}
+
+# Now, we can use the function "dec_tree" with the inputs to estimate the ICER and its corresponding values
+
+dec_tree(input)
+
+```
+
+
+########################################################################################################
+# Part 5. Run base case analysis
+########################################################################################################
+
+```{r setup, include=FALSE}
+
+# Run the decision tree model with base case parameters
+base_results <- dec_tree(input)
+
+# Create a summary table of base case results
+base_case_table <- data.frame(
+  Strategy = c("Treatment A", "Treatment B", "Incremental"),
+  Cost = c(
+    base_results["C_TxA"],
+    base_results["C_TxB"],
+    base_results["Incr Costs"]
+  ),
+  Life_Years = c(
+    base_results["LY_TxA"],
+    base_results["LY_TxB"],
+    base_results["Incr Life Years"]
+  ),
+  ICER = c(NA, NA, base_results["ICER"])
+)
+
+# Format the table nicely
+rownames(base_case_table) <- NULL   #removes the automatic row numbers that R adds to every data.frame by default
+
+# Create a visual table using ggplot2 and gridExtra
+
+# Create a clean table plot
+# textGrob(), tableGrob(), and arrangeGrob() all come from the grid/gridExtra packages. A "grob" (graphic object) is just a visual element that exists in memory but isn't drawn yet. 
+
+base_table_plot <- tableGrob(
+  base_case_table,
+  rows = NULL,
+  theme = ttheme_minimal(
+    core = list(
+      fg_params = list(hjust = 0, x = 0.1, fontsize = 12),    #hjust: horisontal alignment (0: left); x:horisontal position (0.1 = nudge text 10% from left edge)
+      bg_params = list(fill = c("lightblue", "lightgreen", "lightyellow"))
+    ),
+    colhead = list(
+      fg_params = list(fontsize = 13, fontface = "bold", col = "#f7f4ee"),
+      bg_params = list(fill = "darkgrey", col = "white")
+    )
+  )
+)
+
+# Add title to table
+title <- textGrob(
+  "Base Case Cost-Effectiveness Results",
+  gp = gpar(fontsize = 16, fontface = "bold", col = "black")
+)
+
+# Add subtitle
+subtitle <- textGrob(
+  sprintf("Willingness-to-Pay Threshold: £%.2f per Life Year", input$wtp),
+  gp = gpar(fontsize = 11, col = "darkgrey")
+)
+
+# Decision text
+decision_text <- ifelse(
+  base_results["ICER"] < input$wtp,
+  "✓ Treatment A is COST-EFFECTIVE",
+  "✗ Treatment A is NOT cost-effective"
+)
+decision_color <- ifelse(
+  base_results["ICER"] < input$wtp,
+  "darkred",
+  "red"
+)
+
+decision <- textGrob(
+  decision_text,
+  gp = gpar(fontsize = 12, fontface = "bold", col = decision_color)
+)
+
+# Combine all elements
+base_table_final <- arrangeGrob(
+  title,
+  subtitle,
+  base_table_plot,
+  decision,
+  heights = c(0.15, 0.08, 0.65, 0.12),
+  padding = unit(1, "line")
+)
+
+# Display the table
+grid.newpage()
+grid.draw(base_table_final)
+
+# Save as PNG
+ggsave(
+  "base_case_results.png",
+  base_table_final,
+  width = 8,
+  height = 5,
+  dpi = 300,
+  bg = "#f7f4ee"
+)
+ 
+```
+
+########################################################################################################
+# Part 6. One way sensitivity analysis
+########################################################################################################
+
+  # A one-way sensitivity analysis evaluates the impact of parameter uncertainty on the decision model results. Changing one parameter’s values across a specific range allows decision modelers to investigate its impact on the output. For example, if we are interested in the impact of changing the Probability of Cured for Treatment A on the Total Costs, we can vary this probablity across a range of 0% to 100%. 
+
+```{R}
+# Define the range for probability of cure with Treatment A
+# We'll test 11 values evenly spaced from 0.0 to 1.0
+p.TxA_Cured_range <- seq(0.00, 1.00, length.out = 11)
+
+# Create input matrix with varied parameter
+m.owsa.input <- data.frame(
+  p.TxA_ADR    = input$p.TxA_ADR,
+  p.TxB_ADR    = input$p.TxB_ADR,
+  p.TxA_Cured  = p.TxA_Cured_range,    # This is the varied parameter
+  p.TxB_Cured  = input$p.TxB_Cured,
+  ly.Cured     = input$ly.Cured,
+  ly.NotCured  = input$ly.NotCured,
+  c.TxA        = input$c.TxA,
+  c.TxB        = input$c.TxB,
+  c.ADR        = input$c.ADR,
+  c.NoADR      = input$c.NoADR,
+  c.Cured      = input$c.Cured,
+  c.NotCured   = input$c.NotCured,
+  wtp          = input$wtp
+)
+
+# Run model for each parameter value
+outcomes_TC <- t(apply(m.owsa.input, 1, dec_tree))[, 1:2] 
+
+# Without transpose - gives us 7 rows (outputs) × 11 columns (scenarios)
+apply.table1 <- apply(m.owsa.input, 1, dec_tree)
+
+# With transpose - gives us 11 rows (scenarios) × 7 columns (outputs)
+apply.table2 <- t(apply(m.owsa.input, 1, dec_tree))
+
+```
+
+########################################################################################################
+# Part 7. Visualize one-way sensitivity analysis
+########################################################################################################
+
+
+```{R}
+# Create elegant plot using base R with custom colors
+par(
+  mar = c(5, 5, 4, 2),
+  family = "sans"
+)
+
+plot(
+  p.TxA_Cured_range, 
+  outcomes_TC[, 1],
+  type = "l",
+  lwd = 3,
+  col = "blue",
+  xlab = "Probability of Cure with Treatment A",
+  ylab = "Expected Total Cost (£)",
+  main = "One-Way Sensitivity Analysis: Impact on Total Costs",
+  ylim = range(outcomes_TC),
+  las = 1,
+  cex.lab = 1.2,
+  cex.main = 1.3,
+  cex.axis = 1.1
+)
+
+# Add Treatment B line
+lines(
+  p.TxA_Cured_range, 
+  outcomes_TC[, 2],
+  lwd = 3,
+  col = "green"
+)
+
+# Add subtle grid
+grid(
+  col = "gray85",
+  lty = "dotted",
+  lwd = 1
+)
+
+# Add legend with custom styling
+legend(
+  "topright",
+  legend = c("Treatment A", "Treatment B"),
+  col = c("blue", "green"),
+  lwd = 3,
+  bty = "n",
+  cex = 1.2
+)
+
+# Add explanatory note
+mtext(
+  "As cure probability increases, Treatment A costs decrease (fewer uncured patients)",
+  side = 1,
+  line = 4,
+  cex = 0.9,
+  col = "darkgrey"
+)
+
+# Save OWSA plot as PNG
+dev.copy(png, "owsa_plot.png", width = 1200, height = 800, res = 150)
+dev.off()
+
+```
+
+
+########################################################################################################
+# Part 8. Tornado diagram
+########################################################################################################
+
+  # Tornado diagrams show which parameters have the greatest impact on our results.
+  # We vary each parameter across a plausible range and measure the effect on ICER.
+
+```{R}
+
+# Define parameter ranges (typically ±25% or based on literature)
+param_ranges <- list(
+  p.TxA_ADR    = c(base = 0.20,  low = 0.15,  high = 0.25),
+  p.TxB_ADR    = c(base = 0.30,  low = 0.225, high = 0.375),
+  ly.Cured     = c(base = 20,    low = 15,    high = 25),
+  ly.NotCured  = c(base = 10,    low = 7.5,   high = 12.5),
+  c.TxA        = c(base = 100,   low = 75,    high = 125),
+  c.TxB        = c(base = 80,    low = 60,    high = 100),
+  c.ADR        = c(base = 500,   low = 375,   high = 625),
+  c.NotCured   = c(base = 150,   low = 113,   high = 188)
+)
+
+# Create parameter name vector for later use
+paramNames <- names(param_ranges)
+
+# Initialize list to store input scenarios
+l.tor.in <- vector("list", length(param_ranges))
+names(l.tor.in) <- paramNames
+
+# For each parameter, create 3 scenarios (base, low, high)
+for (i in seq_along(param_ranges)) {
+  param_name <- paramNames[i]
+  
+  # Create 3 rows with base case values
+  temp_df <- input[rep(1, 3), ]
+  rownames(temp_df) <- c("base", "low", "high")
+  
+  # Replace the current parameter with its range
+  temp_df[[param_name]] <- param_ranges[[i]]
+  
+  # Store in list
+  l.tor.in[[i]] <- temp_df
+}
+
+# Initialize list to store outputs
+l.tor.out <- vector("list", length(param_ranges))
+names(l.tor.out) <- paramNames
+
+# Run model for each parameter's range and extract ICER
+for (i in 1:length(param_ranges)) {
+  l.tor.out[[i]] <- t(apply(l.tor.in[[i]], 1, dec_tree))[, 7]  # Column 7 is ICER
+}
+
+# Create matrix for tornado plot
+m.tor <- matrix(
+  unlist(l.tor.out),
+  nrow = length(param_ranges),
+  ncol = 3,
+  byrow = TRUE,
+  dimnames = list(paramNames, c("basecase", "low", "high"))
+)
+
+
+# Define readable parameter labels
+param_labels <- c(
+  "P(ADR | Treatment A)",
+  "P(ADR | Treatment B)",
+  "Life Years (Cured)",
+  "Life Years (Not Cured)",
+  "Cost of Treatment A",
+  "Cost of Treatment B",
+  "Cost of ADR",
+  "Cost of Not Cured"
+)
+
+# Calculate impact (range) for ranking
+ymean <- m.tor[1, 1]  # Base case ICER
+ySize <- abs(m.tor[, 3] - m.tor[, 2])  # Range (high - low)
+
+# Rank by impact
+rankY <- order(ySize)
+nParams <- length(param_labels)
+
+# Create data frame for plotting - one row per parameter
+tornado_data <- data.frame(
+  Parameter = param_labels[rankY],
+  Low_ICER = m.tor[rankY, 2],
+  High_ICER = m.tor[rankY, 3],
+  Base_ICER = m.tor[rankY, 1]
+)
+
+# Convert Parameter to ordered factor
+tornado_data$Parameter <- factor(tornado_data$Parameter, levels = param_labels[rankY])
+
+# Calculate axis range with padding
+x_min <- min(c(tornado_data$Low_ICER, tornado_data$High_ICER))
+x_max <- max(c(tornado_data$Low_ICER, tornado_data$High_ICER))
+x_range <- x_max - x_min
+x_lower <- x_min - x_range * 0.20  # Extra space on left for labels
+x_upper <- x_max + x_range * 0.20  # Extra space on right for labels
+
+# Offset for labels - position them just outside the bar ends
+label_offset <- x_range * 0.02
+
+# Create beautiful tornado plot with custom colors
+tornado_plot <- ggplot(tornado_data, aes(y = Parameter)) +
+  # Add bars as line segments with thickness
+  geom_segment(
+    aes(x = Low_ICER, xend = Base_ICER, yend = Parameter),
+    color = "blue",
+    linewidth = 8,
+    alpha = 0.85
+  ) +
+  geom_segment(
+    aes(x = Base_ICER, xend = High_ICER, yend = Parameter),
+    color = "green",
+    linewidth = 8,
+    alpha = 0.85
+  ) +
+  
+  # Add ICER value labels positioned at actual ICER values
+  # Low parameter value labels - position based on whether Low_ICER is left or right of base
+  geom_text(
+    aes(
+      x = ifelse(Low_ICER < Base_ICER, Low_ICER - label_offset, Low_ICER + label_offset),
+      label = sprintf("%.1f", Low_ICER),
+      hjust = ifelse(Low_ICER < Base_ICER, 1, 0)  # Right-align if on left, left-align if on right
+    ),
+    size = 3.2,
+    color = "darkgrey",
+    fontface = "bold"
+  ) +
+  # High parameter value labels - position based on whether High_ICER is left or right of base
+  geom_text(
+    aes(
+      x = ifelse(High_ICER < Base_ICER, High_ICER - label_offset, High_ICER + label_offset),
+      label = sprintf("%.1f", High_ICER),
+      hjust = ifelse(High_ICER < Base_ICER, 1, 0)  # Right-align if on left, left-align if on right
+    ),
+    size = 3.2,
+    color = "darkgrey",
+    fontface = "bold"
+  ) +
+  
+  # Set x-axis limits with extra space for legend and labels
+  scale_x_continuous(
+    limits = c(x_lower, x_upper),
+    expand = c(0, 0)
+  ) +
+  
+  # Remove extra spacing - normal discrete scale
+  scale_y_discrete() +
+  
+  # Base case reference line at actual ICER value
+  geom_vline(xintercept = ymean, linetype = "solid", linewidth = 1, color = "black") +
+  
+  # Labels - include base case ICER in the y-axis title
+  labs(
+    title = "Tornado Diagram: Parameter Uncertainty Impact on ICER",
+    subtitle = sprintf("Bars show ICER range when parameters vary (Base Case ICER: £%.1f - shown by black line)", ymean),
+    x = "ICER (£ per Life Year Gained)",
+    y = "Parameters (Ordered by Impact)"
+  ) +
+  
+  # Clean theme with custom styling
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0, color = "black"),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "darkgrey", margin = margin(b = 15)),
+    axis.title = element_text(face = "bold", size = 12, color = "darkgrey"),
+    axis.text = element_text(size = 11, color = "darkgrey"),
+    axis.text.y = element_text(size = 11),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(20, 20, 20, 20),
+    plot.title.position = "plot"
+  ) +
+  
+  # Add manual legend in the plot area (left side)
+  annotate(
+    "segment",
+    x = x_min - x_range * 0.15,
+    xend = x_min - x_range * 0.10,
+    y = 1.2,
+    yend = 1.2,
+    color = "blue",
+    linewidth = 5
+  ) +
+  annotate(
+    "text",
+    x = x_min - x_range * 0.08,
+    y = 1.2,
+    label = "Low Parameter Value",
+    hjust = 0,
+    size = 3.5,
+    color = "darkgrey"
+  ) +
+  annotate(
+    "segment",
+    x = x_min - x_range * 0.15,
+    xend = x_min - x_range * 0.10,
+    y = 0.6,
+    yend = 0.6,
+    color = "green",
+    linewidth = 5
+  ) +
+  annotate(
+    "text",
+    x = x_min - x_range * 0.08,
+    y = 0.6,
+    label = "High Parameter Value",
+    hjust = 0,
+    size = 3.5,
+    color = "darkgrey"
+  )
+
+# Display the plot
+print(tornado_plot)
+
+# Save tornado diagram as PNG
+ggsave(
+  "tornado_diagram.png",
+  tornado_plot,
+  width = 10,
+  height = 8,
+  dpi = 300,
+  bg = "#f7f4ee"
+)
+
+# Calculate parameter impacts
+param_impacts <- data.frame(
+  Parameter = param_labels,
+  Base_ICER = m.tor[, "basecase"],
+  Low_ICER = m.tor[, "low"],
+  High_ICER = m.tor[, "high"],
+  Range = abs(m.tor[, "high"] - m.tor[, "low"])
+)
+
+# Sort by impact (descending)
+param_impacts <- param_impacts[order(-param_impacts$Range), ]
+rownames(param_impacts) <- NULL
+
+```
+
+
+
+
+
+
+
+
+
+
+
